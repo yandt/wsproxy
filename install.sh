@@ -206,15 +206,15 @@ norm_server() {
 }
 
 ask() {
-  local dest=$1 prompt=$2 default=${3:-} reply
+  local dest=$1 prompt=$2 default=${3:-} _ans=""
   if [[ -n "$default" ]]; then
     printf '%s [%s]: ' "$prompt" "$default" >/dev/tty
   else
     printf '%s: ' "$prompt" >/dev/tty
   fi
-  IFS= read -r reply </dev/tty || true
-  [[ -z "$reply" ]] && reply=$default
-  printf -v "$dest" '%s' "$reply"
+  IFS= read -r _ans </dev/tty || true
+  [[ -z "$_ans" ]] && _ans=$default
+  printf -v "$dest" '%s' "$_ans"
 }
 
 ask_required() {
@@ -230,9 +230,9 @@ ask_required() {
 }
 
 yesno() {
-  local reply
-  ask reply "$1" "${2:-n}"
-  case "$reply" in
+  local _yn=""
+  ask _yn "$1" "${2:-n}"
+  case "$_yn" in
     y | Y | yes | Yes | 是 | 好) return 0 ;;
     *) return 1 ;;
   esac
@@ -437,7 +437,7 @@ prompt_menu() {
   echo "  4) 只更新到最新版程序" >/dev/tty
   echo "  5) 卸载" >/dev/tty
   echo >/dev/tty
-  local choice
+  local choice=""
   ask choice "选一项" "1"
   case "$choice" in
     1 | server) ROLE=server ;;

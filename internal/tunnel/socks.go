@@ -93,6 +93,34 @@ func hasMethod(methods []byte, want byte) bool {
 	return false
 }
 
+func SOCKS5Login(c net.Conn, user, pass string) error {
+	if _, err := c.Write([]byte{5, 1, 2}); err != nil {
+		return err
+	}
+	rep := make([]byte, 2)
+	if _, err := io.ReadFull(c, rep); err != nil {
+		return err
+	}
+	if rep[0] != 5 || rep[1] != 2 {
+		return fmt.Errorf("socks 入口不接受用户名密码")
+	}
+	auth := []byte{1, byte(len(user))}
+	auth = append(auth, user...)
+	auth = append(auth, byte(len(pass)))
+	auth = append(auth, pass...)
+	if _, err := c.Write(auth); err != nil {
+		return err
+	}
+	arep := make([]byte, 2)
+	if _, err := io.ReadFull(c, arep); err != nil {
+		return err
+	}
+	if arep[1] != 0 {
+		return fmt.Errorf("socks 认证失败")
+	}
+	return nil
+}
+
 func SOCKS5OK(c net.Conn) error {
 	return socks5Reply(c, 0)
 }

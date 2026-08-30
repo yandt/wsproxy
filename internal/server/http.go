@@ -39,13 +39,14 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		io.WriteString(w, "ok\n")
 	})
+	mux.HandleFunc("/status", s.handleStatus)
 	mux.HandleFunc("/agent", s.handleAgent)
 	mux.HandleFunc("/c/", s.handleClient)
 	mux.HandleFunc("/t/", s.handleLegacyToken)
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/", s.handleRoot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/health" && r.URL.Path != "/agent" {
+		if r.URL.Path != "/health" && r.URL.Path != "/agent" && r.URL.Path != "/status" {
 			if !s.Hub.AllowsSource(r.RemoteAddr) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return

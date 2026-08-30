@@ -32,13 +32,15 @@ type agentConn struct {
 	sessMu   sync.Mutex
 	sessions map[string]*session
 	closers  []io.Closer
+	exposes  []proto.Expose
 }
 
-func newAgent(name string, conn *websocket.Conn) *agentConn {
+func newAgent(name string, conn *websocket.Conn, exposes []proto.Expose) *agentConn {
 	return &agentConn{
 		name:     name,
 		conn:     conn,
 		sessions: make(map[string]*session),
+		exposes:  append([]proto.Expose(nil), exposes...),
 	}
 }
 
@@ -225,7 +227,7 @@ func (h *Hub) Attach(name string, conn *websocket.Conn, exposes []proto.Expose) 
 		old.closeAll()
 		slog.Info("agent replaced", "id", name)
 	}
-	a := newAgent(name, conn)
+	a := newAgent(name, conn, exposes)
 	h.agents[name] = a
 	h.mu.Unlock()
 

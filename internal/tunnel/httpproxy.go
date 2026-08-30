@@ -88,6 +88,26 @@ func parseProxyBasic(h string) (string, string, bool) {
 	return user, pass, ok
 }
 
+func HTTPProxyLogin(c net.Conn, user, pass string) error {
+	token := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
+	req := "GET / HTTP/1.0\r\nProxy-Authorization: Basic " + token + "\r\n\r\n"
+	if _, err := io.WriteString(c, req); err != nil {
+		return err
+	}
+	br := bufio.NewReader(c)
+	line, err := br.ReadString('\n')
+	if err != nil && line == "" {
+		if err == io.EOF {
+			return nil
+		}
+		return err
+	}
+	if strings.Contains(line, "407") {
+		return fmt.Errorf("http 代理认证失败")
+	}
+	return nil
+}
+
 func hasPort(host string) bool {
 	if strings.HasPrefix(host, "[") {
 		return strings.Contains(host, "]:")

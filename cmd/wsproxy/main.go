@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"wsproxy/internal/allow"
+	"wsproxy/internal/check"
 	"wsproxy/internal/client"
 	"wsproxy/internal/config"
 	"wsproxy/internal/proto"
@@ -25,6 +26,8 @@ func main() {
 		os.Exit(runServer(os.Args[2:]))
 	case "client":
 		os.Exit(runClient(os.Args[2:]))
+	case "test":
+		os.Exit(runTest(os.Args[2:]))
 	case "version", "-v", "--version":
 		fmt.Println(version.String())
 	default:
@@ -39,6 +42,7 @@ func usage() {
 用法:
   wsproxy server [--config 文件.yaml] [选项]
   wsproxy client [--config 文件.yaml] [选项]
+  wsproxy test [server|client] [--config 文件.yaml]
   wsproxy version
 
 配置文件用 YAML。命令行写过的项会覆盖文件。
@@ -173,6 +177,107 @@ func runClient(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func runTest(args []string) int {
+	role := ""
+	if len(args) > 0 && (args[0] == "server" || args[0] == "client") {
+		role = args[0]
+		args = args[1:]
+	}
+	fs := flag.NewFlagSet("test", flag.ExitOnError)
+	configPath := fs.String("config", "", "")
+	fs.String("http", "", "")
+	fs.String("ssh", "", "")
+	fs.String("server", "", "")
+	fs.String("agent-token", "", "")
+	fs.String("access-token", "", "")
+	fs.String("id", "", "")
+	_ = fs.Parse(args)
+	set := visited(fs)
+
+	defServer, defClient := check.DefaultConfigs()
+	path := *configPath
+	okAll := true
+
+	runS := role == "server" || (role == "" && (path != "" || fileOK(defServer)))
+	runC := role == "client" || (role == "" && (path != "" || fileOK(defClient)))
+	if role == "" && path == "" {
+		runS = fileOK(defServer)
+		runC = fileOK(defClient)
+	}
+
+	if !runS && !runC {
+		if path != "" {
+			runS, runC = true, true
+		} else {
+			slog.Error("找不到配置。加上 --config，或把文件放在 /etc/wsproxy/server.yaml、client.yaml")
+			return 2
+		}
+	}
+
+	if runS {
+		file, err := loadServerFile(path, defServer)
+		if err != nil && role == "server" {
+			slog.Error(err.Error())
+			return 2
+		}
+		if err == nil && (file.AccessToken != "" || file.HTTP != "" || role == "server") {
+			cfg := config.MergeServer(file, set)
+			rep := check.Server(cfg)
+			check.Print(os.Stdout, rep)
+			if !rep.OK {
+				okAll = false
+			}
+		} else if role == "server" {
+			slog.Error("这不像服务端配置")
+			return 2
+		}
+	}
+	if runC {
+		file, err := loadClientFile(path, defClient)
+		if err != nil && role == "client" {
+			slog.Error(err.Error())
+			return 2
+		}
+		if err == nil && (file.Server != "" || role == "client") {
+			cfg := config.MergeClient(file, set, nil, nil)
+			rep := check.Client(cfg)
+			if runS {
+				fmt.Println()
+			}
+			check.Print(os.Stdout, rep)
+			if !rep.OK {
+				okAll = false
+			}
+		} else if role == "client" {
+			slog.Error("这不像客户端配置")
+			return 2
+		}
+	}
+	if !okAll {
+		return 1
+	}
+	return 0
+}
+
+func fileOK(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
+func loadServerFile(path, fallback string) (config.Server, error) {
+	if path != "" {
+		return config.LoadServer(path)
+	}
+	return config.LoadServer(fallback)
+}
+
+func loadClientFile(path, fallback string) (config.Client, error) {
+	if path != "" {
+		return config.LoadClient(path)
+	}
+	return config.LoadClient(fallback)
 }
 
 type stringList []string

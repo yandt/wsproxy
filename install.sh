@@ -475,6 +475,36 @@ prompt_server() {
   fi
 }
 
+print_expose_help() {
+  cat >/dev/tty <<'EOF'
+
+隧道可选，一条写一种，直接回车结束。
+都是「服务器上开门，流量从客户端这边出去」。
+只写端口时，口开在服务器本机（127.0.0.1）。要对公网开，写成 0.0.0.0:端口。
+
+  TCP（默认；服务器这个口 → 客户端那个地址）:
+    9000=127.0.0.1:80
+    tcp://9000=127.0.0.1:80
+    0.0.0.0:9000=127.0.0.1:80
+    tcp://0.0.0.0:9000=10.0.0.8:22
+
+  UDP:
+    udp://5353=127.0.0.1:53
+    udp://0.0.0.0:5353=1.1.1.1:53
+
+  SOCKS5（不写目标，连的人自己指定；密码是访问 token）:
+    socks://1080
+    socks5://1080
+    socks://0.0.0.0:1080
+
+  HTTP 代理（不写目标；Basic 认证，密码是访问 token）:
+    http://3128
+    http://127.0.0.1:3128
+    http://0.0.0.0:3128
+
+EOF
+}
+
 prompt_client() {
   echo >/dev/tty
   echo "—— 客户端配置（直接回车用括号里的值）——" >/dev/tty
@@ -493,10 +523,9 @@ prompt_client() {
     fi
   fi
   if [[ ${#EXPOSES[@]} -eq 0 ]]; then
-    echo "隧道可选。一条一条写，直接回车结束。" >/dev/tty
-    echo "例如: 9000=127.0.0.1:80   socks://1080   udp://5353=127.0.0.1:53" >/dev/tty
+    print_expose_help
     while true; do
-      ask v "再加一条隧道" ""
+      ask v "再加一条隧道（回车结束）" ""
       [[ -z "$v" ]] && break
       EXPOSES+=("$v")
     done
@@ -718,6 +747,7 @@ print_server_done() {
   echo
   echo "另一台机器装客户端："
   echo "  curl -fsSL https://github.com/${GITHUB_REPO}/releases/latest/download/install.sh | sudo bash -s -- client --server ws://这台IP${HTTP} --agent-token $AGENT_TOKEN --id office"
+  echo "测连通: wsproxy test server --config /etc/wsproxy/server.yaml"
 }
 
 apply_server() {
@@ -765,6 +795,7 @@ apply_client() {
   write_unit wsproxy-client "$user" "$DATA_DIR" "$CLIENT_CONF" client
   echo
   echo "客户端配置已写入 $CLIENT_CONF ，会自动连 $SERVER_URL"
+  echo "测连通: wsproxy test client --config /etc/wsproxy/client.yaml"
 }
 
 do_config() {

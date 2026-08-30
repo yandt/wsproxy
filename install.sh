@@ -12,6 +12,9 @@ SERVER_URL="${SERVER_URL:-}"
 CLIENT_ID="${CLIENT_ID:-}"
 RUN_USER="${RUN_USER:-}"
 BIN="${BIN:-}"
+GITHUB_REPO="${GITHUB_REPO:-yandt/wsproxy}"
+WSPROXY_VERSION="${WSPROXY_VERSION:-latest}"
+FROM_SOURCE=0
 FORCE=0
 NO_SYSTEMD=0
 YES=0
@@ -29,7 +32,15 @@ CLIENT_CONF="$CONF_DIR/client.yaml"
 usage() {
   cat <<'EOF'
 用法:
-  装到当前这台 Linux（不写参数会出菜单，一项项问）:
+  Linux 上一句装最新版（会出菜单，一项项问）:
+    curl -fsSL https://github.com/yandt/wsproxy/releases/latest/download/install.sh | sudo bash
+
+  直接装服务端 / 客户端 / 只更新程序:
+    curl -fsSL https://github.com/yandt/wsproxy/releases/latest/download/install.sh | sudo bash -s -- server
+    curl -fsSL https://github.com/yandt/wsproxy/releases/latest/download/install.sh | sudo bash -s -- client
+    curl -fsSL https://github.com/yandt/wsproxy/releases/latest/download/install.sh | sudo bash -s -- upgrade
+
+  装到当前这台 Linux（不写参数会出菜单）:
     sudo ./install.sh
     sudo ./install.sh server
     sudo ./install.sh client
@@ -66,6 +77,8 @@ usage() {
 
 共用:
   --bin 路径              用现成的 wsproxy 二进制
+  --release 版本          下载指定发行版，默认 latest
+  --from-source           不下载，用本仓库现场编译
   --prefix /usr/local
   --force                 已有配置也覆盖
   --ask                   即使写了参数也再问一遍
@@ -111,7 +124,60 @@ is_root() {
 
 here_dir() {
   local src=${BASH_SOURCE[0]:-$0}
+  [[ -f "$src" ]] || { echo ""; return; }
   cd "$(dirname "$src")" && pwd
+}
+
+current_os() {
+  case "$(uname -s)" in
+    Linux) echo linux ;;
+    Darwin) echo darwin ;;
+    *) die "现在只支持 Linux / macOS，当前是 $(uname -s)" ;;
+  esac
+}
+
+release_url() {
+  local name=$1
+  local ver=$WSPROXY_VERSION
+  if [[ "$ver" == latest || -z "$ver" ]]; then
+    echo "https://github.com/${GITHUB_REPO}/releases/latest/download/${name}"
+    return
+  fi
+  [[ "$ver" == v* ]] || ver="v$ver"
+  echo "https://github.com/${GITHUB_REPO}/releases/download/${ver}/${name}"
+}
+
+download_file() {
+  local url=$1 dest=$2
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 --connect-timeout 20 -o "$dest" "$url"
+    return
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -O "$dest" "$url"
+    return
+  fi
+  die "需要 curl 或 wget 才能下载发行包"
+}
+
+download_release() {
+  local dest=$1
+  local os arch name url tmp
+  os=$(current_os)
+  arch=$(map_arch "$(uname -m)")
+  name="wsproxy-${os}-${arch}.tar.gz"
+  url=$(release_url "$name")
+  tmp=$(mktemp -d)
+  echo "正在下载 ${WSPROXY_VERSION} ${os}/${arch}"
+  echo "  $url"
+  if ! download_file "$url" "$tmp/$name"; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  tar -xzf "$tmp/$name" -C "$tmp"
+  [[ -f "$tmp/wsproxy" ]] || { rm -rf "$tmp"; die "发行包装得不对，里面没有 wsproxy"; }
+  install -m 0755 "$tmp/wsproxy" "$dest"
+  rm -rf "$tmp"
 }
 
 map_arch() {
@@ -262,14 +328,14 @@ parse_args() {
   ROLE=${1:-}
   [[ $# -gt 0 ]] && shift
   case "$ROLE" in
-    "" | server | client | uninstall | config) ;;
+    "" | server | client | uninstall | config | upgrade) ;;
     -h | --help)
       usage
       exit 0
       ;;
     *)
       usage
-      die "第一个参数应是 server、client、config 或 uninstall"
+      die "第一个参数应是 server、client、config、upgrade 或 uninstall"
       ;;
   esac
 
@@ -306,6 +372,14 @@ parse_args() {
       --bin)
         BIN=$2
         shift 2
+        ;;
+      --release)
+        WSPROXY_VERSION=$2
+        shift 2
+        ;;
+      --from-source)
+        FROM_SOURCE=1
+        shift
         ;;
       --prefix)
         PREFIX=$2
@@ -360,7 +434,8 @@ prompt_menu() {
   echo "  1) 装服务端" >/dev/tty
   echo "  2) 装客户端" >/dev/tty
   echo "  3) 改现有配置" >/dev/tty
-  echo "  4) 卸载" >/dev/tty
+  echo "  4) 只更新到最新版程序" >/dev/tty
+  echo "  5) 卸载" >/dev/tty
   echo >/dev/tty
   local choice
   ask choice "选一项" "1"
@@ -368,7 +443,8 @@ prompt_menu() {
     1 | server) ROLE=server ;;
     2 | client) ROLE=client ;;
     3 | config) ROLE=config ;;
-    4 | uninstall) ROLE=uninstall ;;
+    4 | upgrade) ROLE=upgrade ;;
+    5 | uninstall) ROLE=uninstall ;;
     *) die "无法识别: $choice" ;;
   esac
 }
@@ -501,20 +577,39 @@ do_remote() {
 
 install_binary() {
   local dest="$PREFIX/bin/wsproxy"
+  local root
+  root=$(here_dir)
   mkdir -p "$PREFIX/bin"
   if [[ -n "$BIN" ]]; then
     [[ -x "$BIN" || -f "$BIN" ]] || die "找不到程序: $BIN"
     install -m 0755 "$BIN" "$dest"
-  elif [[ -f "$(here_dir)/go.mod" ]]; then
+  elif [[ "$FROM_SOURCE" -eq 1 ]]; then
+    [[ -n "$root" && -f "$root/go.mod" ]] || die "当前目录不是仓库，不能 --from-source"
     need_cmd go
     build_linux "$dest" "$(map_arch "$(uname -m)")"
     chmod 0755 "$dest"
-  elif command -v wsproxy >/dev/null 2>&1 && [[ "$(command -v wsproxy)" != "$dest" ]]; then
-    install -m 0755 "$(command -v wsproxy)" "$dest"
+  elif download_release "$dest"; then
+    :
+  elif [[ -n "$root" && -f "$root/go.mod" ]]; then
+    echo "下载发行包失败，改成本地编译"
+    need_cmd go
+    build_linux "$dest" "$(map_arch "$(uname -m)")"
+    chmod 0755 "$dest"
   else
-    die "没有可安装的程序。在仓库里执行，或加 --bin"
+    die "下载最新版失败。检查能不能访问 GitHub，或加 --bin"
   fi
   echo "程序: $dest"
+  if [[ -x "$dest" ]]; then
+    echo "版本: $("$dest" version 2>/dev/null || echo 未知)"
+  fi
+}
+
+do_upgrade() {
+  install_binary
+  restart_unit wsproxy-server
+  restart_unit wsproxy-client
+  echo
+  echo "已更新到上面显示的版本。配置没动。"
 }
 
 ensure_user() {
@@ -622,8 +717,7 @@ print_server_done() {
   echo "访问 token access_token: $ACCESS_TOKEN"
   echo
   echo "另一台机器装客户端："
-  echo "  ./install.sh remote 用户@那台机器 client --server ws://这台IP${HTTP} --agent-token $AGENT_TOKEN --id office"
-  echo "或在那台机器上 sudo ./install.sh client ，按提示填。"
+  echo "  curl -fsSL https://github.com/${GITHUB_REPO}/releases/latest/download/install.sh | sudo bash -s -- client --server ws://这台IP${HTTP} --agent-token $AGENT_TOKEN --id office"
 }
 
 apply_server() {
@@ -778,6 +872,9 @@ main() {
       ;;
     config)
       do_config
+      ;;
+    upgrade)
+      do_upgrade
       ;;
     server)
       prompt_if_needed server

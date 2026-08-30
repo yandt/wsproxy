@@ -11,6 +11,7 @@ import (
 	"wsproxy/internal/config"
 	"wsproxy/internal/proto"
 	"wsproxy/internal/server"
+	"wsproxy/internal/version"
 )
 
 func main() {
@@ -24,6 +25,8 @@ func main() {
 		os.Exit(runServer(os.Args[2:]))
 	case "client":
 		os.Exit(runClient(os.Args[2:]))
+	case "version", "-v", "--version":
+		fmt.Println(version.String())
 	default:
 		usage()
 		os.Exit(2)
@@ -36,6 +39,7 @@ func usage() {
 用法:
   wsproxy server [--config 文件.yaml] [选项]
   wsproxy client [--config 文件.yaml] [选项]
+  wsproxy version
 
 配置文件用 YAML。命令行写过的项会覆盖文件。
 

@@ -23,16 +23,32 @@
 
 ## 安装
 
+Linux 上一句装最新发行版（会出菜单，按提示填）：
+
+```bash
+curl -fsSL https://github.com/yandt/wsproxy/releases/latest/download/install.sh | sudo bash
+```
+
+指定装服务端或客户端：
+
+```bash
+curl -fsSL https://github.com/yandt/wsproxy/releases/latest/download/install.sh | sudo bash -s -- server
+curl -fsSL https://github.com/yandt/wsproxy/releases/latest/download/install.sh | sudo bash -s -- client
+```
+
+只把程序更新到最新版（不改配置）：
+
+```bash
+curl -fsSL https://github.com/yandt/wsproxy/releases/latest/download/install.sh | sudo bash -s -- upgrade
+```
+
+脚本会按这台机器的系统自动选 `linux-amd64` 或 `linux-arm64`。发行说明见 https://github.com/yandt/wsproxy/releases 。
+
 本机编译：
 
 ```bash
 go build -o wsproxy ./cmd/wsproxy
-```
-
-Linux 远程安装（在仓库目录执行，会编译并拷过去；远端一项项问配置）：
-
-```bash
-./install.sh remote 用户@那台机器
+./wsproxy version
 ```
 
 已经装过的机器改配置（改完自动重启）：
@@ -41,7 +57,11 @@ Linux 远程安装（在仓库目录执行，会编译并拷过去；远端一�
 sudo ./install.sh config
 ```
 
-不写参数会出菜单。也可以直接 `sudo ./install.sh server` 或 `client`，按提示填口令、端口、白名单。全部用参数、不问话时加 `--yes`。
+从本仓库拷到另一台 Linux（开发未发布的改动时用）：
+
+```bash
+./install.sh remote 用户@那台机器
+```
 
 ## 用 YAML 配置
 

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>wsproxy</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0d10; }
+    #term { height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="term"></div>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <script>
+    const term = new Terminal({ cursorBlink: true, fontSize: 14 });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById("term"));
+    fit.fit();
+
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(proto + "//" + location.host + location.pathname.replace(/\/?$/, "/") + "ws");
+    ws.binaryType = "arraybuffer";
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ t: "resize", cols: term.cols, rows: term.rows }));
+    };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === "string") {
+        term.write(ev.data);
+        return;
+      }
+      term.write(new Uint8Array(ev.data));
+    };
+    ws.onclose = () => term.write("\r\n连接已断开\r\n");
+    term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    });
+    window.addEventListener("resize", () => {
+      fit.fit();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ t: "resize", cols: term.cols, rows: term.rows }));
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+server: ws://你的服务器IP:8080
+agent_token: 改成隧道口令
+id: office
+# shell: /bin/bash
+
+# 只写端口时默认听 127.0.0.1。要对公网开请写 0.0.0.0:端口。
+# SOCKS/HTTP 的密码是服务端 access_token。
+# 不写 allow_targets 就全放行。写了只允许连这些地方。
+# allow_targets:
+#   - 127.0.0.1:80
+#   - 10.0.0.0/8
+expose:
+  - 9000=127.0.0.1:80
+  - socks://1080
+  - kind: udp
+    listen: "127.0.0.1:5353"
+    target: 127.0.0.1:53

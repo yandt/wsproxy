@@ -1,0 +1,6 @@
+/wsproxy
+/bin/
+/dist/
+ssh_host_key
+.wsproxy/
+*.exe

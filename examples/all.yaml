@@ -1,0 +1,27 @@
+# 一份文件里同时写服务端和客户端。
+# 启动时：wsproxy server --config all.yaml
+#         wsproxy client --config all.yaml
+
+server:
+  http: ":8080"
+  ssh: ":2222"
+  agent_token: 改成隧道口令
+  access_token: 改成访问token
+  host_key: ssh_host_key
+  # allow_ips: [127.0.0.1, 10.0.0.0/8]
+  # allow_clients: [office]
+  # allow_targets: [127.0.0.1:80, 10.0.0.0/8]
+
+client:
+  server: ws://你的服务器IP:8080
+  agent_token: 改成隧道口令
+  id: office
+  # allow_targets: [127.0.0.1:80, 10.0.0.0/8]
+  expose:
+    - kind: tcp
+      listen: ":9000"
+      target: 127.0.0.1:80
+    - kind: socks
+      listen: 127.0.0.1:1080
+    - kind: http
+      listen: 127.0.0.1:3128

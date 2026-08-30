@@ -57,6 +57,12 @@ go build -o wsproxy ./cmd/wsproxy
 sudo ./install.sh config
 ```
 
+没有 systemd 的客户端（容器、部分云开发环境）不用 systemctl，装好后会走后台进程；也可前台跑：
+
+```bash
+wsproxy client --config /etc/wsproxy/client.yaml
+```
+
 测连通（服务端、客户端都能跑，会列出每条隧道的入口和对端）：
 
 ```bash

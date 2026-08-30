@@ -54,6 +54,13 @@ usage() {
     ./install.sh remote 用户@主机 client
     ./install.sh remote 用户@主机 config
 
+  没有 systemd 的机器（容器、部分开发环境）:
+    安装时会自动改用后台进程，不依赖 systemctl。
+    sudo ./install.sh start client
+    sudo ./install.sh stop client
+    sudo ./install.sh status client
+    也可前台跑: wsproxy client --config /etc/wsproxy/client.yaml
+
   卸掉:
     sudo ./install.sh uninstall
 
@@ -328,14 +335,14 @@ parse_args() {
   ROLE=${1:-}
   [[ $# -gt 0 ]] && shift
   case "$ROLE" in
-    "" | server | client | uninstall | config | upgrade) ;;
+    "" | server | client | uninstall | config | upgrade | start | stop | status) ;;
     -h | --help)
       usage
       exit 0
       ;;
     *)
       usage
-      die "第一个参数应是 server、client、config、upgrade 或 uninstall"
+      die "第一个参数应是 server、client、config、upgrade、start、stop、status 或 uninstall"
       ;;
   esac
 
@@ -666,26 +673,154 @@ ensure_user() {
   fi
 }
 
+have_systemd() {
+  [[ "$NO_SYSTEMD" -eq 0 ]] || return 1
+  command -v systemctl >/dev/null 2>&1 || return 1
+  [[ -d /run/systemd/system ]] || return 1
+  case "$(systemctl is-system-running 2>/dev/null || true)" in
+    running | degraded | maintenance) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+bg_pidfile() {
+  echo "$DATA_DIR/${1}.pid"
+}
+
+bg_logfile() {
+  echo "$DATA_DIR/${1}.log"
+}
+
+read_pid() {
+  tr -d ' \n' <"$1" 2>/dev/null || true
+}
+
+bg_running() {
+  local pidf pid
+  pidf=$(bg_pidfile "$1")
+  [[ -f "$pidf" ]] || return 1
+  pid=$(read_pid "$pidf")
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+start_bg() {
+  local role=$1 user=$2 conf=$3
+  local pidf log pid
+  pidf=$(bg_pidfile "$role")
+  log=$(bg_logfile "$role")
+  mkdir -p "$DATA_DIR"
+  if bg_running "$role"; then
+    echo "已在后台运行（pid $(read_pid "$pidf")），日志 $log"
+    return
+  fi
+  touch "$log"
+  chown "$user:$user" "$DATA_DIR" "$log" 2>/dev/null || true
+  nohup "$PREFIX/bin/wsproxy" "$role" --config "$conf" >>"$log" 2>&1 &
+  pid=$!
+  echo "$pid" >"$pidf"
+  sleep 0.4
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "没有 systemd，已用后台进程启动 $role（pid $pid）"
+    echo "日志: tail -f $log"
+    echo "停止: $0 stop $role"
+  else
+    echo "后台启动失败，看日志: $log" >&2
+    return 1
+  fi
+}
+
+stop_bg() {
+  local role=$1
+  local pidf pid
+  pidf=$(bg_pidfile "$role")
+  if ! bg_running "$role"; then
+    echo "$role 没在后台跑"
+    rm -f "$pidf"
+    return
+  fi
+  pid=$(read_pid "$pidf")
+  kill "$pid" 2>/dev/null || true
+  sleep 0.3
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$pidf"
+  echo "已停止 $role"
+}
+
+status_bg() {
+  local role=$1
+  if bg_running "$role"; then
+    echo "$role 在跑，pid $(read_pid "$(bg_pidfile "$role")")"
+    echo "日志 $(bg_logfile "$role")"
+  else
+    echo "$role 没在跑"
+    return 1
+  fi
+}
+
+do_service() {
+  local action=$1
+  local role=${2:-}
+  if [[ -z "$role" ]]; then
+    if [[ -f "$CLIENT_CONF" ]]; then
+      role=client
+    elif [[ -f "$SERVER_CONF" ]]; then
+      role=server
+    else
+      die "请写 start/stop/status client 或 server"
+    fi
+  fi
+  case "$role" in
+    client | server) ;;
+    *) die "只能是 client 或 server" ;;
+  esac
+  local unit="wsproxy-${role}"
+  local conf="$CONF_DIR/${role}.yaml"
+  if have_systemd && systemctl cat "$unit" >/dev/null 2>&1; then
+    systemctl "$action" "$unit"
+    return
+  fi
+  case "$action" in
+    start)
+      local user=root
+      if [[ "$role" == client ]]; then
+        user=${RUN_USER:-${SUDO_USER:-root}}
+      else
+        user=${RUN_USER:-wsproxy}
+      fi
+      start_bg "$role" "$user" "$conf"
+      ;;
+    stop) stop_bg "$role" ;;
+    status) status_bg "$role" ;;
+    restart)
+      stop_bg "$role" || true
+      do_service start "$role"
+      ;;
+    *) die "未知动作 $action" ;;
+  esac
+}
+
 restart_unit() {
   local name=$1
-  [[ "$NO_SYSTEMD" -eq 1 ]] && return
-  [[ -d /run/systemd/system ]] || return
-  systemctl daemon-reload
-  if systemctl cat "$name" >/dev/null 2>&1; then
+  local role=${name#wsproxy-}
+  if have_systemd && systemctl cat "$name" >/dev/null 2>&1; then
+    systemctl daemon-reload
     systemctl restart "$name"
     systemctl enable "$name" >/dev/null
     echo "已重启: systemctl status $name"
+    return
+  fi
+  if [[ -f "$CONF_DIR/${role}.yaml" ]]; then
+    do_service restart "$role"
   fi
 }
 
 write_unit() {
   local name=$1 user=$2 workdir=$3 conf=$4 role=$5
-  [[ "$NO_SYSTEMD" -eq 1 ]] && return
-  [[ -d /run/systemd/system ]] || {
-    echo "这台机器没有 systemd，请自己后台跑："
-    echo "  $PREFIX/bin/wsproxy $role --config $conf"
+  if ! have_systemd; then
+    echo "这台机器没有可用的 systemd，改用后台进程（断线会自己重连）。"
+    start_bg "$role" "$user" "$conf"
     return
-  }
+  fi
   cat >"/etc/systemd/system/${name}.service" <<EOF
 [Unit]
 Description=wsproxy ${role}
@@ -819,7 +954,14 @@ apply_client() {
   write_unit wsproxy-client "$user" "$DATA_DIR" "$CLIENT_CONF" client
   echo
   echo "客户端配置已写入 $CLIENT_CONF ，会自动连 $SERVER_URL"
-  echo "测连通: wsproxy test client --config /etc/wsproxy/client.yaml"
+  if have_systemd; then
+    echo "测连通: wsproxy test client --config /etc/wsproxy/client.yaml"
+  else
+    echo "没有 systemd。看日志: tail -f $DATA_DIR/client.log"
+    echo "停止: $0 stop client    启动: $0 start client"
+    echo "或前台跑: wsproxy client --config $CLIENT_CONF"
+    echo "测连通: wsproxy test client --config $CLIENT_CONF"
+  fi
 }
 
 do_config() {
@@ -887,6 +1029,8 @@ do_uninstall() {
     rm -f /etc/systemd/system/wsproxy-server.service /etc/systemd/system/wsproxy-client.service
     systemctl daemon-reload
   fi
+  stop_bg server 2>/dev/null || true
+  stop_bg client 2>/dev/null || true
   rm -f "$PREFIX/bin/wsproxy"
   if have_tty && yesno "连配置一起删掉（/etc/wsproxy、/var/lib/wsproxy）？" n; then
     rm -rf "$CONF_DIR" "$DATA_DIR"
@@ -906,6 +1050,11 @@ main() {
     local target=$2
     shift 2
     do_remote "$target" "$@"
+    return
+  fi
+  if [[ "${1:-}" == start || "${1:-}" == stop || "${1:-}" == status ]]; then
+    is_root || die "请用 sudo 运行"
+    do_service "$1" "${2:-}"
     return
   fi
 

@@ -179,7 +179,7 @@ func ClientTo(w io.Writer, cfg config.Client) Report {
 		} else {
 			names := clientNames(quick)
 			if names == "" {
-				r.addTo(w, 0, "本机已上线", false, id+" 不在线（服务器上还没有客户端）")
+				r.addTo(w, 0, "本机已上线", false, id+" 不在线。请先启动客户端: wsproxy client --config /etc/wsproxy/client.yaml")
 			} else {
 				r.addTo(w, 0, "本机已上线", false, id+" 不在线，现在在线: "+names)
 			}

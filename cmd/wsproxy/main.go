@@ -222,10 +222,14 @@ func runTest(args []string) int {
 			slog.Error(err.Error())
 			return 2
 		}
-		if err == nil && (file.AccessToken != "" || file.HTTP != "" || role == "server") {
+		if err != nil {
+			slog.Error(err.Error())
+			if role == "server" {
+				return 2
+			}
+		} else if file.AccessToken != "" || file.HTTP != "" || role == "server" {
 			cfg := config.MergeServer(file, set)
 			rep := check.Server(cfg)
-			check.Print(os.Stdout, rep)
 			if !rep.OK {
 				okAll = false
 			}
@@ -236,23 +240,31 @@ func runTest(args []string) int {
 	}
 	if runC {
 		file, err := loadClientFile(path, defClient)
-		if err != nil && role == "client" {
+		if err != nil {
 			slog.Error(err.Error())
-			return 2
-		}
-		if err == nil && (file.Server != "" || role == "client") {
+			if role == "client" {
+				return 2
+			}
+		} else {
 			cfg := config.MergeClient(file, set, nil, nil)
-			rep := check.Client(cfg)
+			if cfg.Server == "" {
+				fmt.Println("配置里没有主服务器地址。")
+				cfg.Server = check.Prompt("请输入主服务器地址（例如 ws://1.2.3.4:8080）: ")
+			}
+			if cfg.AgentToken == "" {
+				cfg.AgentToken = check.Prompt("请输入隧道口令 agent_token: ")
+			}
+			if cfg.Server == "" {
+				slog.Error("没有服务器地址，测不了是否连通")
+				return 2
+			}
 			if runS {
 				fmt.Println()
 			}
-			check.Print(os.Stdout, rep)
+			rep := check.Client(cfg)
 			if !rep.OK {
 				okAll = false
 			}
-		} else if role == "client" {
-			slog.Error("这不像客户端配置")
-			return 2
 		}
 	}
 	if !okAll {

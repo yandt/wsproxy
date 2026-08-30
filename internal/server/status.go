@@ -41,7 +41,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	rep := s.Diagnose(3 * time.Second)
+	var rep StatusReport
+	if r.URL.Query().Get("probe") == "0" {
+		rep = s.Snapshot()
+	} else {
+		rep = s.Diagnose(3 * time.Second)
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if !rep.OK {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -57,6 +62,35 @@ func (s *Server) statusAuth(r *http.Request) bool {
 		return true
 	}
 	return auth.Equal(r.Header.Get("X-Agent-Token"), s.AgentToken)
+}
+
+func (s *Server) Snapshot() StatusReport {
+	rep := StatusReport{HTTP: s.HTTPAddr, SSH: s.SSHAddr, OK: true}
+	h := s.Hub
+	h.mu.Lock()
+	agents := make([]*agentConn, 0, len(h.agents))
+	for _, a := range h.agents {
+		agents = append(agents, a)
+	}
+	h.mu.Unlock()
+	sort.Slice(agents, func(i, j int) bool { return agents[i].name < agents[j].name })
+	if len(agents) == 0 {
+		rep.OK = false
+	}
+	for _, a := range agents {
+		cs := ClientStatus{ID: a.name, Online: true}
+		for _, exp := range a.exposes {
+			kind := exp.Kind
+			if kind == "" {
+				kind = proto.KindTCP
+			}
+			cs.Tunnels = append(cs.Tunnels, TunnelStatus{
+				Kind: kind, Listen: exp.Listen, Target: exp.Target, Note: "未实测",
+			})
+		}
+		rep.Clients = append(rep.Clients, cs)
+	}
+	return rep
 }
 
 func (s *Server) Diagnose(timeout time.Duration) StatusReport {

@@ -635,6 +635,18 @@ install_binary() {
 
 do_upgrade() {
   install_binary
+  if [[ -f "$SERVER_CONF" ]]; then
+    local su
+    su=$(systemctl show -p User --value wsproxy-server 2>/dev/null || echo wsproxy)
+    [[ -n "$su" ]] || su=wsproxy
+    fix_conf_perm "$SERVER_CONF" "$su"
+  fi
+  if [[ -f "$CLIENT_CONF" ]]; then
+    local cu
+    cu=$(systemctl show -p User --value wsproxy-client 2>/dev/null || echo "${SUDO_USER:-root}")
+    [[ -n "$cu" ]] || cu=${SUDO_USER:-root}
+    fix_conf_perm "$CLIENT_CONF" "$cu"
+  fi
   restart_unit wsproxy-server
   restart_unit wsproxy-client
   echo
@@ -679,6 +691,7 @@ write_unit() {
 Description=wsproxy ${role}
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -711,9 +724,21 @@ write_server_yaml() {
     write_yaml_list allow_clients "${ALLOW_CLIENTS[@]+"${ALLOW_CLIENTS[@]}"}"
     write_yaml_list allow_targets "${ALLOW_TARGETS[@]+"${ALLOW_TARGETS[@]}"}"
   } >"$SERVER_CONF"
-  chmod 600 "$SERVER_CONF"
-  chown root:root "$SERVER_CONF"
+  fix_conf_perm "$SERVER_CONF" "$user"
   chown -R "$user:$user" "$DATA_DIR"
+}
+
+fix_conf_perm() {
+  local conf=$1 user=$2
+  [[ -f "$conf" ]] || return
+  mkdir -p "$(dirname "$conf")"
+  if [[ "$user" == root ]]; then
+    chown root:root "$conf"
+    chmod 600 "$conf"
+  else
+    chown "root:$user" "$conf" 2>/dev/null || chown "$user:$user" "$conf"
+    chmod 640 "$conf"
+  fi
 }
 
 write_client_yaml() {
@@ -728,8 +753,7 @@ write_client_yaml() {
     write_yaml_list expose "${EXPOSES[@]+"${EXPOSES[@]}"}"
     write_yaml_list allow_targets "${ALLOW_TARGETS[@]+"${ALLOW_TARGETS[@]}"}"
   } >"$CLIENT_CONF"
-  chmod 600 "$CLIENT_CONF"
-  chown root:root "$CLIENT_CONF"
+  fix_conf_perm "$CLIENT_CONF" "$user"
   if [[ "$user" != root ]]; then
     chown -R "$user:$user" "$DATA_DIR" 2>/dev/null || true
   fi
